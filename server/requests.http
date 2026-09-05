@@ -1,0 +1,72 @@
+@baseUrl = http://localhost:3000/api/v1
+
+### 1. Login (run this first, copy the token into @token below)
+# @ login
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{"email":"owner@spicegarden.test","password":"password123"}
+
+### 2. Create order  (paste fresh token after login)
+POST {{baseUrl}}/orders
+Content-Type: application/json
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2YTk1MjlhY2VhOTdkYTI4NGNmMjdmMDYiLCJ0ZW5hbnRJZCI6IjZhOTUyOWFjZWE5N2RhMjg0Y2YyN2YwNCIsInJvbGUiOiJvd25lciIsImlhdCI6MTc4ODQzMzM0NywiZXhwIjoxNzg5MDM4MTQ3fQ.-NKaXBKHt7iFWz474I6qNwKV8LpnoiADIWpC5kfVHnc
+
+{"items":[{"itemId":"6a958fb1602257e3b1c83b39","quantity":2}],"tableNumber":"T4"}
+
+### 3. Confirm the order
+PATCH {{baseUrl}}/orders/6a99594ea53c5b7c8782703e/status
+Content-Type: application/json
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2YTk1MjlhY2VhOTdkYTI4NGNmMjdmMDYiLCJ0ZW5hbnRJZCI6IjZhOTUyOWFjZWE5N2RhMjg0Y2YyN2YwNCIsInJvbGUiOiJvd25lciIsImlhdCI6MTc4ODQzMzM0NywiZXhwIjoxNzg5MDM4MTQ3fQ.-NKaXBKHt7iFWz474I6qNwKV8LpnoiADIWpC5kfVHnc
+
+{"status":"confirmed"}
+
+
+### 4. Illegal jump - must return 409
+PATCH {{baseUrl}}/orders/6a995640898dc9b8fc95f41d/status
+Content-Type: application/json
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2YTk1MjlhY2VhOTdkYTI4NGNmMjdmMDYiLCJ0ZW5hbnRJZCI6IjZhOTUyOWFjZWE5N2RhMjg0Y2YyN2YwNCIsInJvbGUiOiJvd25lciIsImlhdCI6MTc4ODQzMzM0NywiZXhwIjoxNzg5MDM4MTQ3fQ.-NKaXBKHt7iFWz474I6qNwKV8LpnoiADIWpC5kfVHnc
+
+{"status":"served"}
+
+
+
+### Public menu (no auth!)
+GET {{baseUrl}}/public/spice-garden-gd6lm/menu
+
+### Customer orders from table 5 (no auth!)
+POST {{baseUrl}}/public/spice-garden-gd6lm/table/5/order
+Content-Type: application/json
+
+{"items":[{"itemId":"6a958fb1602257e3b1c83b39","quantity":1}],"customerName":"Ravi"}
+
+### Kitchen board (auth required)
+GET {{baseUrl}}/kitchen/orders
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2YTk1MjlhY2VhOTdkYTI4NGNmMjdmMDYiLCJ0ZW5hbnRJZCI6IjZhOTUyOWFjZWE5N2RhMjg0Y2YyN2YwNCIsInJvbGUiOiJvd25lciIsImlhdCI6MTc4ODQzMzM0NywiZXhwIjoxNzg5MDM4MTQ3fQ.-NKaXBKHt7iFWz474I6qNwKV8LpnoiADIWpC5kfVHnc
+
+
+### Who am I
+### Who am I
+GET {{baseUrl}}/auth/me
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2YTk1MjlhY2VhOTdkYTI4NGNmMjdmMDYiLCJ0ZW5hbnRJZCI6IjZhOTUyOWFjZWE5N2RhMjg0Y2YyN2YwNCIsInJvbGUiOiJvd25lciIsImlhdCI6MTc4ODQzMzM0NywiZXhwIjoxNzg5MDM4MTQ3fQ.-NKaXBKHt7iFWz474I6qNwKV8LpnoiADIWpC5kfVHnc
+
+
+### Walk order 12: pending -> confirmed -> preparing -> ready -> served
+PATCH {{baseUrl}}/orders/6a99594ea53c5b7c8782703e/status
+Content-Type: application/json
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2YTk1MjlhY2VhOTdkYTI4NGNmMjdmMDYiLCJ0ZW5hbnRJZCI6IjZhOTUyOWFjZWE5N2RhMjg0Y2YyN2YwNCIsInJvbGUiOiJvd25lciIsImlhdCI6MTc4ODQzMzM0NywiZXhwIjoxNzg5MDM4MTQ3fQ.-NKaXBKHt7iFWz474I6qNwKV8LpnoiADIWpC5kfVHnc
+
+{"status":"confirmed"}
+
+
+### Walk 11 - step 1
+PATCH {{baseUrl}}/orders/6a995c65a53c5b7c8782704c/status
+Content-Type: application/json
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2YTk1MjlhY2VhOTdkYTI4NGNmMjdmMDYiLCJ0ZW5hbnRJZCI6IjZhOTUyOWFjZWE5N2RhMjg0Y2YyN2YwNCIsInJvbGUiOiJvd25lciIsImlhdCI6MTc4ODQzMzM0NywiZXhwIjoxNzg5MDM4MTQ3fQ.-NKaXBKHt7iFWz474I6qNwKV8LpnoiADIWpC5kfVHnc
+
+{"status":"served"}
+
+
+### Kitchen board (auth required)
+GET {{baseUrl}}/kitchen/orders
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2YTk1MjlhY2VhOTdkYTI4NGNmMjdmMDYiLCJ0ZW5hbnRJZCI6IjZhOTUyOWFjZWE5N2RhMjg0Y2YyN2YwNCIsInJvbGUiOiJvd25lciIsImlhdCI6MTc4ODQzMzM0NywiZXhwIjoxNzg5MDM4MTQ3fQ.-NKaXBKHt7iFWz474I6qNwKV8LpnoiADIWpC5kfVHnc

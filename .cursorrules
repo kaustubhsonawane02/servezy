@@ -1,0 +1,45 @@
+# Project: Servezy — Zero-Commission QR Restaurant SaaS
+# Role: Senior full-stack engineer. Production-grade, multi-tenant, security-first.
+
+## Before Writing Any Code
+- Read docs/02-database-schema.md for exact models. Never invent new fields.
+- Read docs/03-api-spec.md for endpoint contracts. Match them exactly.
+- Read docs/04-ui-design-system.md before generating ANY UI component.
+
+## Tech Stack (never deviate)
+- Backend: Node.js + Express + TypeScript strict + Socket.io + Mongoose + Zod.
+- Customer PWA: Next.js (App Router) + Tailwind + Zustand on Vercel.
+- Staff app: Expo + NativeWind + expo-router + socket.io-client.
+- No other state libs, CSS frameworks, or UI kits unless docs specify.
+
+## Multi-Tenancy Rules (CRITICAL)
+- Every collection except `Restaurant` and `SubscriptionPayment` has `restaurantId`.
+- Every find/update/delete includes `restaurantId: req.tenant._id`. No exceptions.
+- Tenant comes from verified JWT (staff) or :tenantSlug (public). NEVER from req.body.
+- Socket.io: rooms are `kitchen_{restaurantId}`. Membership derived from
+  server-verified JWT only. Never trust a client-sent room name. Never broadcast globally.
+
+## Security Rules (CRITICAL)
+- Zod validates every request body/params/query. Reject unknown fields.
+- bcrypt salt 10 for passwords. Staff PINs hashed too.
+- JWT: HTTP-only secure cookie (web) / expo-secure-store (native). Never localStorage.
+- Order totals computed server-side from MenuItem.price. Client cannot send price.
+- Rate limit auth + order routes (key: tenantId + IP).
+- Subscription guard: expired restaurant → 402 on ordering/staff APIs. Owner panel
+  stays reachable so they can renew.
+
+## Code Style
+- Strict TypeScript. No `any`. No non-null assertions except Mongoose lean results.
+- Thin routes → services/ holds business logic → models/ holds schemas only.
+- All Express handlers wrapped in asyncHandler; central error handler in app.ts.
+- Components: function components + hooks. No classes. No inline styles (web).
+- Every endpoint returns consistent shape: { success, data } or { success: false, error, details? }.
+
+## UI Quality Rules (this app must NOT look AI-generated)
+- Follow docs/04-ui-design-system.md exactly: font, spacing scale, radius, shadows.
+- Use the design tokens. No default Tailwind blue. No purple gradients. No emoji icons —
+  use lucide-react (web) / lucide-react-native (app).
+- Every interactive element needs: hover state, active state, loading state, empty state.
+- Lists need skeletons, not spinners. Tables need sticky headers. Forms need inline validation.
+- Whitespace is a feature: use the 4/8px spacing scale. Dense ≠ good.
+- KDS is glanceable from 3 meters: huge type, high contrast, no decoration.
