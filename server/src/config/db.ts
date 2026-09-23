@@ -19,6 +19,7 @@ export async function connectDB(retries = MAX_RETRIES): Promise<void> {
     console.warn(
       `MongoDB connection failed (retriesretriesleft).Retryingin{retries} retries left). Retrying inretriesretriesleft).Retryingin{RETRY_DELAY_MS / 1000}s...`
     );
+
     await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
     await connectDB(retries - 1);
   }

@@ -1,26 +1,31 @@
-﻿import mongoose, { Schema, type Document, type Model } from 'mongoose';
-import type { OrderStatus } from './types';
+import mongoose, { Schema, type Document, type Model } from 'mongoose';
+
+export type OrderStatus = 'placed' | 'preparing' | 'ready' | 'served' | 'completed';
+export type PaymentStatus = 'pending' | 'paid_via_upi' | 'cash' | 'confirmed_by_staff';
+export type OrderSource = 'qr' | 'waiter';
 
 export interface IOrderItem {
   menuItemId: mongoose.Types.ObjectId;
-  nameSnapshot: string;
-  priceSnapshot: number;
-  quantity: number;
+  name: string;           // snapshot at order time — never changes with menu edits
+  quantity: number;       // 1–20
+  price: number;          // snapshot price in whole rupees
+  specialInstructions?: string; // max 200 chars
 }
 
 export interface IOrder extends Document {
-  tenantId: mongoose.Types.ObjectId;
-  orderNumber: number;
-  status: OrderStatus;
+  restaurantId: mongoose.Types.ObjectId;
+  tableNumber: string;
   items: IOrderItem[];
   subtotal: number;
-  tax: number;
-  total: number;
-  tableNumber?: string;
+  taxAmount: number;
+  discountAmount: number;
+  totalAmount: number;
+  status: OrderStatus;
+  paymentStatus: PaymentStatus;
+  source: OrderSource;
   customerName?: string;
   customerPhone?: string;
   notes?: string;
-  placedBy: mongoose.Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -28,42 +33,50 @@ export interface IOrder extends Document {
 const orderItemSchema = new Schema<IOrderItem>(
   {
     menuItemId: { type: Schema.Types.ObjectId, ref: 'MenuItem', required: true },
-    nameSnapshot: { type: String, required: true },
-    priceSnapshot: { type: Number, required: true, min: 0 },
-    quantity: { type: Number, required: true, min: 1 },
+    name: { type: String, required: true },
+    quantity: { type: Number, required: true, min: 1, max: 20 },
+    price: { type: Number, required: true, min: 0 },
+    specialInstructions: { type: String, maxlength: 200 },
   },
   { _id: false },
 );
 
 const orderSchema = new Schema<IOrder>(
   {
-    tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', required: true },
-    orderNumber: { type: Number, required: true },
+    restaurantId: { type: Schema.Types.ObjectId, ref: 'Tenant', required: true },
+    tableNumber: { type: String, required: true, trim: true },
+    items: {
+      type: [orderItemSchema],
+      required: true,
+      validate: { validator: (v: unknown[]) => v.length > 0, message: 'Order must have at least one item' },
+    },
+    subtotal: { type: Number, required: true, min: 0 },
+    taxAmount: { type: Number, required: true, min: 0, default: 0 },
+    discountAmount: { type: Number, required: true, min: 0, default: 0 },
+    totalAmount: { type: Number, required: true, min: 0 },
     status: {
       type: String,
       required: true,
-      enum: ['pending', 'confirmed', 'preparing', 'ready', 'served', 'cancelled'],
+      enum: ['placed', 'preparing', 'ready', 'served', 'completed'],
+      default: 'placed',
+    },
+    paymentStatus: {
+      type: String,
+      required: true,
+      enum: ['pending', 'paid_via_upi', 'cash', 'confirmed_by_staff'],
       default: 'pending',
     },
-    items: { type: [orderItemSchema], required: true, validate: (v: unknown[]) => v.length > 0 },
-    subtotal: { type: Number, required: true, min: 0 },
-    tax: { type: Number, required: true, min: 0, default: 0 },
-    total: { type: Number, required: true, min: 0 },
-    tableNumber: { type: String, trim: true },
+    source: { type: String, required: true, enum: ['qr', 'waiter'], default: 'qr' },
     customerName: { type: String, trim: true, maxlength: 80 },
     customerPhone: { type: String, trim: true },
     notes: { type: String, trim: true, maxlength: 300 },
-    placedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   },
   { timestamps: true },
 );
 
-// Kitchen screen: live orders for one tenant, newest first
-orderSchema.index({ tenantId: 1, status: 1, createdAt: -1 });
-// Prevents duplicate order numbers per tenant (ORD-1, ORD-2, ...)
-orderSchema.index({ tenantId: 1, orderNumber: 1 }, { unique: true });
-// Daily sales reports
-orderSchema.index({ tenantId: 1, createdAt: -1 });
+// ⚡ mandatory indexes from schema doc
+orderSchema.index({ restaurantId: 1, status: 1, createdAt: -1 }); // KDS + active orders
+orderSchema.index({ restaurantId: 1, createdAt: -1 });             // daily reports
 
 export const Order: Model<IOrder> =
   mongoose.models.Order ?? mongoose.model<IOrder>('Order', orderSchema);

@@ -1,20 +1,22 @@
-﻿import { Router, type Request, type Response, type NextFunction } from 'express';
-import mongoose from 'mongoose';
+import { Router, type Request, type Response, type NextFunction } from 'express';
 import { Tenant } from '../models/Tenant';
-import { User } from '../models/User';
-import { signupSchema, loginSchema } from '../validators/auth';
+import { StaffUser } from '../models/StaffUser';
+import { signupSchema, loginSchema, staffLoginSchema } from '../validators/auth';
 import { signToken } from '../utils/jwt';
 import { env } from '../config/env';
-import type { Role } from '../models/types';
 import { requireAuth } from '../middleware/auth';
 import { rateLimit } from '../middleware/rateLimit';
 
-
 const router = Router();
 
-// Helper: set the JWT in an HTTP-only cookie AND return it (Bearer fallback for kitchen tablet)
-function issueSession(res: Response, userId: string, tenantId: string, role: Role): string {
-  const token = signToken({ sub: userId, tenantId: tenantId, role: role });
+// Helper: issue JWT cookie + return raw token (Bearer fallback for kitchen tablet)
+function issueSession(
+  res: Response,
+  sub: string,
+  restaurantId: string,
+  role: import('../models/types').Role,
+): string {
+  const token = signToken({ sub, restaurantId, role });
   res.cookie('token', token, {
     httpOnly: true,
     secure: env.NODE_ENV === 'production',
@@ -24,16 +26,17 @@ function issueSession(res: Response, userId: string, tenantId: string, role: Rol
   return token;
 }
 
-// Wrap async handlers so rejections reach the central error handler
 const asyncHandler =
   (fn: (req: Request, res: Response, next: NextFunction) => Promise<unknown>) =>
   (req: Request, res: Response, next: NextFunction) => {
     fn(req, res, next).catch(next);
   };
 
-// POST /api/v1/auth/signup - creates tenant + owner in one transaction, starts trial
+// POST /api/v1/auth/register
+// Creates a new restaurant (tenant) + owner StaffUser, starts 14-day trial
 router.post(
-  '/signup',
+  '/register',
+  rateLimit({ windowMs: 15 * 60 * 1000, max: 5 }), // 5 signups per IP per 15 min
   asyncHandler(async (req, res) => {
     const parsed = signupSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -44,151 +47,203 @@ router.post(
       });
       return;
     }
-    const input = parsed.data;
+    const { restaurantName, ownerName, email, password, phone } = parsed.data;
 
-    // Unique slug: name, lowercased, non-alphanumerics dashed, random suffix
+    // Check email uniqueness
+    const existing = await Tenant.findOne({ ownerEmail: email.toLowerCase() });
+    if (existing) {
+      res.status(409).json({ success: false, error: 'Email already registered' });
+      return;
+    }
+
+    // Unique slug: name → lowercase-kebab + random suffix
     const baseSlug =
-      input.restaurantName
+      restaurantName
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/^-+|-+$/g, '') || 'restaurant';
-    const slug = baseSlug + '-' + Math.random().toString(36).slice(2, 7);
+    const slug = `${baseSlug}-${Math.random().toString(36).slice(2, 7)}`;
 
-    const trialEndsAt = new Date(Date.now() + env.TRIAL_DAYS * 24 * 60 * 60 * 1000);
+    const now = new Date();
+    const trialDays = env.TRIAL_DAYS;
+    const expiresAt = new Date(now.getTime() + trialDays * 24 * 60 * 60 * 1000);
 
-    const session = await mongoose.startSession();
-    try {
-      let tenantId: mongoose.Types.ObjectId | undefined;
-      let userId: mongoose.Types.ObjectId | undefined;
+    const passwordHash = await StaffUser.hashPassword(password);
 
-      await session.withTransaction(async () => {
-        const passwordHash = await User.hashPassword(input.password);
+    // Create tenant (restaurant) — stores owner credentials at tenant level too
+    const tenant = await Tenant.create({
+      name: restaurantName,
+      slug,
+      ownerEmail: email.toLowerCase(),
+      passwordHash, // owner logs in via this
+      subscription: {
+        plan: 'trial',
+        status: 'trial',
+        startedAt: now,
+        expiresAt,
+      },
+    });
 
-        const [tenant] = await Tenant.create(
-          [
-            {
-              name: input.restaurantName,
-              slug: slug,
-              email: input.email,
-              phone: input.phone,
-              trialStartedAt: new Date(),
-              trialEndsAt: trialEndsAt,
-            },
-          ],
-          { session },
-        );
-        tenantId = tenant!._id;
+    // Create owner StaffUser record (for RBAC and per-restaurant queries)
+    const staffUser = await StaffUser.create({
+      restaurantId: tenant._id,
+      name: ownerName,
+      email: email.toLowerCase(),
+      passwordHash,
+      role: 'owner',
+      ...(phone ? { phone } : {}),
+    });
 
+    const token = issueSession(res, String(staffUser._id), String(tenant._id), 'owner');
 
-        const [user] = await User.create(
-          [
-            {
-              tenantId: tenant!._id,
-              name: input.ownerName,
-              email: input.email,
-              passwordHash: passwordHash,
-              role: 'owner',
-            },
-          ],
-          { session },
-        );
-        userId = user!._id;
-      });
-
-      if (!tenantId || !userId) {
-        res.status(500).json({ success: false, error: 'Signup failed' });
-        return;
-      }
-
-      const token = issueSession(res, userId.toString(), tenantId.toString(), 'owner');
-
-      res.status(201).json({
-        success: true,
-        data: {
-          tenant: { id: tenantId.toString(), name: input.restaurantName, slug: slug },
-          trialEndsAt: trialEndsAt.toISOString(),
-          token: token,
-        },
-      });
-    } finally {
-      await session.endSession();
-    }
-  }),
-);
-
-// POST /api/v1/auth/login
-router.post(
-  '/login',
-  asyncHandler(async (req, res) => {
-    const parsed = loginSchema.safeParse(req.body);
-    if (!parsed.success) {
-        rateLimit({ windowMs: 15 * 60 * 1000, max: 10 }),
-      res.status(400).json({ success: false, error: 'Validation failed' });
-      return;
-    }
-    const input = parsed.data;
-
-    // Deliberately vague on failure: never reveal whether email or password was wrong
-    const fail = (): void => {
-      res.status(401).json({ success: false, error: 'Invalid credentials' });
-    };
-
-    const user = await User.findOne({ email: input.email.toLowerCase(), isActive: true });
-    if (!user) {
-      fail();
-      return;
-    }
-
-    const ok = await user.comparePassword(input.password);
-    if (!ok) {
-      fail();
-      return;
-    }
-
-    const tenant = await Tenant.findById(user.tenantId);
-    if (!tenant || !tenant.isActive) {
-      fail();
-      return;
-    }
-
-    user.lastLoginAt = new Date();
-    await user.save();
-
-    const token = issueSession(res, user._id.toString(), user.tenantId.toString(), user.role);
-
-    res.json({
+    res.status(201).json({
       success: true,
       data: {
-        user: { id: user._id, name: user.name, email: user.email, role: user.role },
-        tenant: { id: tenant._id, name: tenant.name, slug: tenant.slug },
-        token: token,
+        restaurant: {
+          id: tenant._id,
+          name: tenant.name,
+          slug: tenant.slug,
+        },
+        user: {
+          id: staffUser._id,
+          name: staffUser.name,
+          role: staffUser.role,
+        },
+        subscription: {
+          status: tenant.subscription.status,
+          expiresAt: tenant.subscription.expiresAt,
+          trialDays,
+        },
+        token,
       },
     });
   }),
 );
 
-// POST /api/v1/auth/logout - clears the cookie
+// POST /api/v1/auth/login
+// Owner/manager login by email + password
+router.post(
+  '/login',
+  rateLimit({ windowMs: 15 * 60 * 1000, max: 10 }),
+  asyncHandler(async (req, res) => {
+    const parsed = loginSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ success: false, error: 'Validation failed' });
+      return;
+    }
+    const { email, password } = parsed.data;
+    const fail = (): void => {
+      res.status(401).json({ success: false, error: 'Invalid credentials' });
+    };
+
+    // Find active staff user by email (owner/manager)
+    const user = await StaffUser.findOne({ email: email.toLowerCase(), isActive: true });
+    if (!user) { fail(); return; }
+
+    const ok = await user.comparePassword(password);
+    if (!ok) { fail(); return; }
+
+    const tenant = await Tenant.findById(user.restaurantId);
+    if (!tenant || !tenant.isActive) { fail(); return; }
+
+    user.lastLoginAt = new Date();
+    await user.save();
+
+    const token = issueSession(res, String(user._id), String(user.restaurantId), user.role);
+
+    res.json({
+      success: true,
+      data: {
+        user: { id: user._id, name: user.name, email: user.email, role: user.role },
+        restaurant: {
+          id: tenant._id,
+          name: tenant.name,
+          slug: tenant.slug,
+          subscription: tenant.subscription,
+        },
+        token,
+      },
+    });
+  }),
+);
+
+// POST /api/v1/auth/staff-login
+// Kitchen/billing staff login by restaurantId + PIN (tablet flow)
+router.post(
+  '/staff-login',
+  rateLimit({ windowMs: 15 * 60 * 1000, max: 20 }),
+  asyncHandler(async (req, res) => {
+    const parsed = staffLoginSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ success: false, error: 'Validation failed' });
+      return;
+    }
+    const { restaurantSlug, staffName, pin } = parsed.data;
+    const fail = (): void => {
+      res.status(401).json({ success: false, error: 'Invalid PIN' });
+    };
+
+    const tenant = await Tenant.findOne({ slug: restaurantSlug.toLowerCase() });
+    if (!tenant || !tenant.isActive) { fail(); return; }
+
+    // Match by name within the restaurant (kitchen staff don't have emails)
+    const user = await StaffUser.findOne({
+      restaurantId: tenant._id,
+      name: staffName,
+      isActive: true,
+      role: { $in: ['kitchen', 'billing', 'manager'] },
+    });
+    if (!user) { fail(); return; }
+
+    const ok = await user.comparePin(pin);
+    if (!ok) { fail(); return; }
+
+    user.lastLoginAt = new Date();
+    await user.save();
+
+    const token = issueSession(res, String(user._id), String(tenant._id), user.role);
+
+    res.json({
+      success: true,
+      data: {
+        user: { id: user._id, name: user.name, role: user.role },
+        restaurant: { id: tenant._id, name: tenant.name, slug: tenant.slug },
+        token,
+      },
+    });
+  }),
+);
+
+// POST /api/v1/auth/logout
 router.post('/logout', (_req, res) => {
   res.clearCookie('token');
   res.json({ success: true, data: { message: 'Logged out' } });
 });
 
-// GET /api/v1/auth/me - session introspection for the frontend
+// GET /api/v1/auth/me
 router.get(
   '/me',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const user = await User.findById(req.auth!.sub);
+    const user = await StaffUser.findById(req.auth!.sub);
     if (!user || !user.isActive) {
       res.status(401).json({ success: false, error: 'Account unavailable' });
       return;
     }
-    const tenant = await Tenant.findById(user.tenantId);
+    const tenant = await Tenant.findById(user.restaurantId);
     res.json({
       success: true,
       data: {
         user: { id: user._id, name: user.name, email: user.email, role: user.role },
-        tenant: tenant ? { id: tenant._id, name: tenant.name, slug: tenant.slug, trialEndsAt: tenant.trialEndsAt } : null,
+        restaurant: tenant
+          ? {
+              id: tenant._id,
+              name: tenant.name,
+              slug: tenant.slug,
+              subscription: tenant.subscription,
+              settings: tenant.settings,
+            }
+          : null,
       },
     });
   }),

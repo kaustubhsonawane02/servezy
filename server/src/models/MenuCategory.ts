@@ -1,28 +1,27 @@
-﻿import mongoose, { Schema, type Document, type Model } from 'mongoose';
+import mongoose, { Schema, type Document, type Model } from 'mongoose';
 
 export interface IMenuCategory extends Document {
-  tenantId: mongoose.Types.ObjectId;
+  restaurantId: mongoose.Types.ObjectId;
   name: string;
-  displayOrder: number;
-  isAvailable: boolean;
+  sortOrder: number;
   createdAt: Date;
   updatedAt: Date;
 }
 
 const menuCategorySchema = new Schema<IMenuCategory>(
   {
-    tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', required: true },
+    restaurantId: { type: Schema.Types.ObjectId, ref: 'Tenant', required: true },
     name: { type: String, required: true, trim: true, minlength: 1, maxlength: 60 },
-    displayOrder: { type: Number, required: true, min: 0 },
-    isAvailable: { type: Boolean, default: true },
+    sortOrder: { type: Number, required: true, default: 0 },
   },
   { timestamps: true },
 );
 
-// Category names are unique per restaurant, not globally
-menuCategorySchema.index({ tenantId: 1, name: 1 }, { unique: true });
-// Menu page loads: fetch all categories for a tenant, sorted
-menuCategorySchema.index({ tenantId: 1, displayOrder: 1 });
+// ⚡ from schema doc
+menuCategorySchema.index({ restaurantId: 1, sortOrder: 1 });
+// Category names are unique per restaurant
+menuCategorySchema.index({ restaurantId: 1, name: 1 }, { unique: true });
 
 export const MenuCategory: Model<IMenuCategory> =
-  mongoose.models.MenuCategory ?? mongoose.model<IMenuCategory>('MenuCategory', menuCategorySchema);
+  mongoose.models.MenuCategory ??
+  mongoose.model<IMenuCategory>('MenuCategory', menuCategorySchema);

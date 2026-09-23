@@ -1,4 +1,4 @@
-﻿import { z } from 'zod';
+import { z } from 'zod';
 
 const objectId = z.string().regex(/^[0-9a-fA-F]{24}$/, 'Invalid id format');
 
@@ -19,5 +19,5 @@ export const createOrderSchema = z.object({
 });
 
 export const updateStatusSchema = z.object({
-  status: z.enum(['confirmed', 'preparing', 'ready', 'served', 'cancelled']),
+  status: z.enum(['placed', 'preparing', 'ready', 'served', 'completed']),
 });

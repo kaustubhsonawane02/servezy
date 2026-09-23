@@ -1,4 +1,4 @@
-﻿import { Router, type Request, type Response, type NextFunction } from 'express';
+import { Router, type Request, type Response, type NextFunction } from 'express';
 import mongoose from 'mongoose';
 import rateLimit from 'express-rate-limit';
 import { Tenant } from '../models/Tenant';
@@ -38,11 +38,11 @@ router.use(
       res.status(404).json({ success: false, error: 'Restaurant not found' });
       return;
     }
-    if (tenant.trialEndsAt && tenant.trialEndsAt.getTime() < Date.now()) {
+    if (tenant.subscription.status === 'expired' || tenant.subscription.status === 'suspended') {
       res.status(403).json({ success: false, error: 'This restaurant is not accepting orders' });
       return;
     }
-    res.locals.tenantId = String(tenant._id);
+    res.locals.restaurantId = String(tenant._id);
     next();
   }),
 );
@@ -51,9 +51,9 @@ router.use(
 router.get(
   '/:slug/menu',
   asyncHandler(async (req: Request, res: Response) => {
-    const tenantId = res.locals.tenantId;
-    const categories = await MenuCategory.find({ tenantId }).sort({ displayOrder: 1, name: 1 });
-    const items = await MenuItem.find({ tenantId, isAvailable: true }).sort({ displayOrder: 1, name: 1 });
+    const restaurantId = res.locals.restaurantId;
+    const categories = await MenuCategory.find({ restaurantId }).sort({ sortOrder: 1, name: 1 });
+    const items = await MenuItem.find({ restaurantId, inStock: true, isActive: true }).sort({ displayOrder: 1, name: 1 });
     res.json({
       success: true,
       data: {
@@ -76,13 +76,13 @@ router.post(
       return;
     }
 
-    const tenantId = res.locals.tenantId;
+    const restaurantId = res.locals.restaurantId;
     const { items, customerName, notes } = parsed.data;
     const tableNumber = req.params.tableNumber;
 
-    // Re-price from DB; only available items of THIS tenant
+    // Re-price from DB; only available items of THIS restaurant
     const ids = items.map((i) => new mongoose.Types.ObjectId(i.itemId));
-    const dbItems = await MenuItem.find({ _id: { $in: ids }, tenantId, isAvailable: true });
+    const dbItems = await MenuItem.find({ _id: { $in: ids }, restaurantId, inStock: true, isActive: true });
     const byId = new Map(dbItems.map((d) => [String(d._id), d]));
 
     const orderItems = [];
@@ -94,34 +94,34 @@ router.post(
       }
       orderItems.push({
         menuItemId: new mongoose.Types.ObjectId(line.itemId),
-        nameSnapshot: menu.name,
-        priceSnapshot: menu.price,
+        name: menu.name,
+        price: menu.price,
         quantity: line.quantity,
       });
     }
 
-    const subtotal = orderItems.reduce((sum, i) => sum + i.priceSnapshot * i.quantity, 0);
+    const subtotal = orderItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
     const tax = 0;
     const total = subtotal + tax;
 
-    const last = await Order.findOne({ tenantId }).sort({ orderNumber: -1 }).select('orderNumber');
     const order = await Order.create({
-      tenantId,
-      orderNumber: (last?.orderNumber ?? 0) + 1,
-      status: 'pending', // staff must confirm; customer orders never skip the queue
+      restaurantId,
+      status: 'placed',
       items: orderItems,
       subtotal,
-      tax,
-      total,
+      taxAmount: tax,
+      discountAmount: 0,
+      totalAmount: total,
+      paymentStatus: 'pending',
+      source: 'qr',
       tableNumber,
       customerName,
       notes,
-      placedBy: tenantId, // system-placed; refine when staff users are linked
     });
 
     res.status(201).json({
       success: true,
-      data: { orderNumber: order.orderNumber, status: order.status, total: order.total },
+      data: { orderId: order._id, status: order.status, total: order.totalAmount },
     });
   }),
 );

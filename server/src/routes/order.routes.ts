@@ -1,9 +1,10 @@
-﻿import { Router, type Request, type Response, type NextFunction } from 'express';
+import { Router, type Request, type Response, type NextFunction } from 'express';
 import mongoose from 'mongoose';
 import { Order, type IOrderItem } from '../models/Order';
 import { MenuItem } from '../models/MenuItem';
 import { requireAuth, requireRole, subscriptionGuard } from '../middleware/auth';
 import { createOrderSchema, updateStatusSchema } from '../validators/order';
+import { ORDER_TRANSITIONS, ORDER_STATUS } from '../models/types';
 
 const router = Router();
 
@@ -14,14 +15,7 @@ const asyncHandler =
   };
 
 // Legal transitions of the order state machine
-const TRANSITIONS: Record<string, string[]> = {
-  pending: ['confirmed', 'cancelled'],
-  confirmed: ['preparing', 'cancelled'],
-  preparing: ['ready', 'cancelled'],
-  ready: ['served'],
-  served: [],
-  cancelled: [],
-};
+const TRANSITIONS = ORDER_TRANSITIONS;
 
 router.use(requireAuth, subscriptionGuard);
 
@@ -40,7 +34,7 @@ router.post(
 
     // Re-price from the DB. NEVER trust client-sent prices.
     const ids = items.map((i) => new mongoose.Types.ObjectId(i.itemId));
-    const dbItems = await MenuItem.find({ _id: { $in: ids }, tenantId: req.auth!.tenantId, isAvailable: true });
+    const dbItems = await MenuItem.find({ _id: { $in: ids }, restaurantId: req.auth!.restaurantId, inStock: true, isActive: true });
     const byId = new Map(dbItems.map((d) => [String(d._id), d]));
 
     const orderItems: IOrderItem[] = [];
@@ -52,45 +46,33 @@ router.post(
       }
       orderItems.push({
         menuItemId: new mongoose.Types.ObjectId(line.itemId),
-        nameSnapshot: menu.name,
-        priceSnapshot: menu.price,
+        name: menu.name,
+        price: menu.price,
         quantity: line.quantity,
       });
     }
 
-    const subtotal = orderItems.reduce((sum, i) => sum + i.priceSnapshot * i.quantity, 0);
-    const tax = 0; // pluggable later: per-tenant tax rate
-    const total = subtotal + tax;
+    const subtotal = orderItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
+    const taxAmount = 0; // pluggable later: per-tenant tax rate
+    const totalAmount = subtotal + taxAmount;
 
-    // Atomic order-number allocation within a transaction
-    const order = await mongoose.connection.transaction(async (session) => {
-      const last = await Order.findOne({ tenantId: req.auth!.tenantId })
-        .sort({ orderNumber: -1 })
-        .select('orderNumber')
-        .session(session);
-      const nextNumber = (last?.orderNumber ?? 0) + 1;
-      return Order.create(
-        [
-          {
-            tenantId: req.auth!.tenantId,
-            orderNumber: nextNumber,
-            status: 'pending',
-            items: orderItems,
-            subtotal,
-            tax,
-            total,
-            tableNumber,
-            customerName,
-            customerPhone,
-            notes,
-            placedBy: req.auth!.sub,
-          },
-        ],
-        { session },
-      );
+    const order = await Order.create({
+      restaurantId: req.auth!.restaurantId,
+      tableNumber: tableNumber ?? 'Takeaway',
+      items: orderItems,
+      subtotal,
+      taxAmount,
+      discountAmount: 0,
+      totalAmount,
+      status: 'placed',
+      paymentStatus: 'pending',
+      source: 'waiter',
+      customerName,
+      customerPhone,
+      notes,
     });
 
-    res.status(201).json({ success: true, data: order[0] ?? order });
+    res.status(201).json({ success: true, data: order });
   }),
 );
 
@@ -98,8 +80,8 @@ router.post(
 router.get(
   '/',
   asyncHandler(async (req, res) => {
-    const filter: Record<string, unknown> = { tenantId: req.auth!.tenantId };
-    if (typeof req.query.status === 'string' && ['pending', 'confirmed', 'preparing', 'ready', 'served', 'cancelled'].includes(req.query.status)) {
+    const filter: Record<string, unknown> = { restaurantId: req.auth!.restaurantId };
+    if (typeof req.query.status === 'string' && (ORDER_STATUS as readonly string[]).includes(req.query.status)) {
       filter.status = req.query.status;
     }
     const orders = await Order.find(filter).sort({ createdAt: -1 }).limit(100);
@@ -115,7 +97,7 @@ router.get(
       res.status(400).json({ success: false, error: 'Invalid id' });
       return;
     }
-    const order = await Order.findOne({ _id: req.params.id, tenantId: req.auth!.tenantId });
+    const order = await Order.findOne({ _id: req.params.id, restaurantId: req.auth!.restaurantId });
     if (!order) {
       res.status(404).json({ success: false, error: 'Order not found' });
       return;
@@ -139,7 +121,7 @@ router.patch(
       return;
     }
 
-    const order = await Order.findOne({ _id: req.params.id, tenantId: req.auth!.tenantId });
+    const order = await Order.findOne({ _id: req.params.id, restaurantId: req.auth!.restaurantId });
     if (!order) {
       res.status(404).json({ success: false, error: 'Order not found' });
       return;

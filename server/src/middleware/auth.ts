@@ -1,6 +1,6 @@
-﻿import type { Request, Response, NextFunction } from 'express';
+import type { Request, Response, NextFunction } from 'express';
 import { verifyToken, type JwtPayload } from '../utils/jwt';
-import { Tenant } from '../models/Tenant';
+import { Tenant, type ITenant } from '../models/Tenant';
 import type { Role } from '../models/types';
 
 // Augment Express Request with our auth context
@@ -9,7 +9,7 @@ declare global {
   namespace Express {
     interface Request {
       auth?: JwtPayload;
-      tenant?: typeof Tenant extends { prototype: infer T } ? T : never;
+      tenant?: ITenant;
     }
   }
 }
@@ -57,24 +57,41 @@ export function requireRole(...roles: Role[]) {
   };
 }
 
-// Loads the tenant doc, checks active + trial/subscription status.
-// Blocks the API once the trial lapses until a plan is "subscribed".
-export async function subscriptionGuard(req: Request, res: Response, next: NextFunction): Promise<void> {
+// Loads the tenant doc and checks subscription status.
+// - Active trial → pass through
+// - Active paid plan → pass through
+// - Expired/suspended → 402
+export async function subscriptionGuard(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
   if (!req.auth) {
     res.status(401).json({ success: false, error: 'Authentication required' });
     return;
   }
-  const tenant = await Tenant.findById(req.auth.tenantId);
+
+  // Superadmin bypasses the subscription check
+  if (req.auth.role === 'superadmin') {
+    next();
+    return;
+  }
+
+  const tenant = await Tenant.findById(req.auth.restaurantId);
   if (!tenant || !tenant.isActive) {
     res.status(403).json({ success: false, error: 'Tenant unavailable' });
     return;
   }
-  const onTrial = tenant.trialEndsAt ? tenant.trialEndsAt > new Date() : false;
-  const subscribed = (tenant as unknown as { plan?: string }).plan !== undefined;
-  if (!onTrial && !subscribed) {
-    res.status(402).json({ success: false, error: 'Trial expired. Please subscribe.' });
+
+  const { status } = tenant.subscription;
+  if (status === 'expired' || status === 'suspended') {
+    res.status(402).json({
+      success: false,
+      error: status === 'expired' ? 'Trial expired. Please subscribe.' : 'Account suspended.',
+    });
     return;
   }
+
   req.tenant = tenant;
   next();
 }

@@ -1,36 +1,42 @@
-﻿import mongoose, { Schema, type Document, type Model } from 'mongoose';
+import mongoose, { Schema, type Document, type Model } from 'mongoose';
 
 export interface IMenuItem extends Document {
-  tenantId: mongoose.Types.ObjectId;
+  restaurantId: mongoose.Types.ObjectId;
   categoryId: mongoose.Types.ObjectId;
   name: string;
   description?: string;
-  price: number;
+  price: number;       // whole rupees, no floats
   isVeg: boolean;
-  isAvailable: boolean;
+  inStock: boolean;    // toggled live; emits socket menu_updated
+  isActive: boolean;   // soft-delete flag — never hard-delete items with order history
   imageUrl?: string;
+  upsellTag?: string;  // "goes well with" — links to another MenuItem name
+  displayOrder: number;
   createdAt: Date;
   updatedAt: Date;
 }
 
 const menuItemSchema = new Schema<IMenuItem>(
   {
-    tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', required: true },
+    restaurantId: { type: Schema.Types.ObjectId, ref: 'Tenant', required: true },
     categoryId: { type: Schema.Types.ObjectId, ref: 'MenuCategory', required: true },
     name: { type: String, required: true, trim: true, minlength: 1, maxlength: 120 },
-    description: { type: String, trim: true, maxlength: 500 },
+    description: { type: String, trim: true, maxlength: 300 },
     price: { type: Number, required: true, min: 0 },
     isVeg: { type: Boolean, required: true },
-    isAvailable: { type: Boolean, default: true },
+    inStock: { type: Boolean, default: true },
+    isActive: { type: Boolean, default: true },
     imageUrl: { type: String },
+    upsellTag: { type: String },
+    displayOrder: { type: Number, default: 0 },
   },
   { timestamps: true },
 );
 
-// Item names unique within a restaurant
-menuItemSchema.index({ tenantId: 1, name: 1 }, { unique: true });
-// The hot path: full menu fetch for a tenant grouped by category
-menuItemSchema.index({ tenantId: 1, categoryId: 1, isAvailable: 1 });
+// ⚡ from schema doc
+menuItemSchema.index({ restaurantId: 1, categoryId: 1 });
+// Fast public menu: active + inStock items for a tenant
+menuItemSchema.index({ restaurantId: 1, categoryId: 1, inStock: 1, isActive: 1 });
 
 export const MenuItem: Model<IMenuItem> =
   mongoose.models.MenuItem ?? mongoose.model<IMenuItem>('MenuItem', menuItemSchema);

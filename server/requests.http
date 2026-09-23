@@ -70,3 +70,23 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2YTk1MjlhY
 ### Kitchen board (auth required)
 GET {{baseUrl}}/kitchen/orders
 Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2YTk1MjlhY2VhOTdkYTI4NGNmMjdmMDYiLCJ0ZW5hbnRJZCI6IjZhOTUyOWFjZWE5N2RhMjg0Y2YyN2YwNCIsInJvbGUiOiJvd25lciIsImlhdCI6MTc4ODQzMzM0NywiZXhwIjoxNzg5MDM4MTQ3fQ.-NKaXBKHt7iFWz474I6qNwKV8LpnoiADIWpC5kfVHnc
+
+
+### Bill a ready/served order (use a served order's id)
+POST {{baseUrl}}/bills/orders/SERVED_ORDER_ID
+Authorization: Bearer YOUR_TOKEN
+
+### Retrieve the bill
+GET {{baseUrl}}/bills/orders/SERVED_ORDER_ID
+Authorization: Bearer YOUR_TOKEN
+
+### Pay it (exact amount from bill response)
+PATCH {{baseUrl}}/bills/orders/SERVED_ORDER_ID/pay
+Authorization: Bearer YOUR_TOKEN
+Content-Type: application/json
+
+{"method":"upi","amount":378}
+
+### Daily report for today
+GET {{baseUrl}}/reports/daily?date=2026-09-03
+Authorization: Bearer YOUR_TOKEN
