@@ -5,7 +5,8 @@ import { signupSchema, loginSchema, staffLoginSchema } from '../validators/auth'
 import { signToken } from '../utils/jwt';
 import { env } from '../config/env';
 import { requireAuth } from '../middleware/auth';
-import { rateLimit } from '../middleware/rateLimit';
+import { authLimiter } from '../middleware/rateLimit';
+
 
 const router = Router();
 
@@ -28,15 +29,15 @@ function issueSession(
 
 const asyncHandler =
   (fn: (req: Request, res: Response, next: NextFunction) => Promise<unknown>) =>
-  (req: Request, res: Response, next: NextFunction) => {
-    fn(req, res, next).catch(next);
-  };
+    (req: Request, res: Response, next: NextFunction) => {
+      fn(req, res, next).catch(next);
+    };
 
 // POST /api/v1/auth/register
 // Creates a new restaurant (tenant) + owner StaffUser, starts 14-day trial
 router.post(
   '/register',
-  rateLimit({ windowMs: 15 * 60 * 1000, max: 5 }), // 5 signups per IP per 15 min
+  authLimiter,
   asyncHandler(async (req, res) => {
     const parsed = signupSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -124,7 +125,7 @@ router.post(
 // Owner/manager login by email + password
 router.post(
   '/login',
-  rateLimit({ windowMs: 15 * 60 * 1000, max: 10 }),
+  authLimiter,
   asyncHandler(async (req, res) => {
     const parsed = loginSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -171,7 +172,7 @@ router.post(
 // Kitchen/billing staff login by restaurantId + PIN (tablet flow)
 router.post(
   '/staff-login',
-  rateLimit({ windowMs: 15 * 60 * 1000, max: 20 }),
+  authLimiter,
   asyncHandler(async (req, res) => {
     const parsed = staffLoginSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -237,12 +238,12 @@ router.get(
         user: { id: user._id, name: user.name, email: user.email, role: user.role },
         restaurant: tenant
           ? {
-              id: tenant._id,
-              name: tenant.name,
-              slug: tenant.slug,
-              subscription: tenant.subscription,
-              settings: tenant.settings,
-            }
+            id: tenant._id,
+            name: tenant.name,
+            slug: tenant.slug,
+            subscription: tenant.subscription,
+            settings: tenant.settings,
+          }
           : null,
       },
     });

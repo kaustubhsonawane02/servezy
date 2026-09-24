@@ -3,7 +3,7 @@ import helmet from 'helmet';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import mongoose from 'mongoose';
-import { allowedOrigins } from './config/env';
+import { allowedOrigins, env } from './config/env';
 import { notFound } from './middleware/notFound';
 import { errorHandler } from './middleware/errorHandler';
 import authRoutes from './routes/auth.routes';
@@ -20,7 +20,8 @@ const app = express();
 
 // --- Security & parsing middleware ---
 app.use(helmet());
-app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
+// Updated to use the validated Zod env
+app.use(morgan(env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 app.use(
   cors({
     origin: allowedOrigins,

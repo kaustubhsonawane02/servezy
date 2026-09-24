@@ -1,28 +1,21 @@
-﻿import { app } from './app';
-import { connectDB, disconnectDB } from './config/db';
+﻿import mongoose from 'mongoose';
+import { app } from './app';
 import { env } from './config/env';
 
-async function bootstrap(): Promise<void> {
-  await connectDB();
+const startServer = async () => {
+  try {
+    // 1. Connect to MongoDB using the validated URL
+    await mongoose.connect(env.DATABASE_URL);
+    console.log('✅ Connected to MongoDB');
 
-  const server = app.listen(env.PORT, () => {
-    const line = 'Servezy API running on :' + env.PORT + ' [' + env.NODE_ENV + ']';
-    console.log(line);
-  });
-
-  const shutdown = (signal: string) => {
-    console.log(signal + ' received. Shutting down gracefully...');
-    server.close(() => {
- disconnectDB().then(() => process.exit(0));
+    // 2. Start the Express server
+    app.listen(env.PORT, () => {
+      console.log(`🚀 Server running in ${env.NODE_ENV} mode on port ${env.PORT}`);
     });
-    setTimeout(() => process.exit(1), 10_000).unref();
-  };
+  } catch (error) {
+    console.error('❌ Error starting server:', error);
+    process.exit(1);
+  }
+};
 
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
-  process.on('SIGINT', () => shutdown('SIGINT'));
-}
-
-bootstrap().catch((err) => {
-  console.error('Fatal bootstrap error:', err);
-  process.exit(1);
-});
+startServer();
