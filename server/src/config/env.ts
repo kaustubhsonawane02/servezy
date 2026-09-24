@@ -1,7 +1,6 @@
 import { z } from 'zod';
 import dotenv from 'dotenv';
 
-// Load .env if not in production
 if (process.env.NODE_ENV !== 'production') {
   dotenv.config();
 }
@@ -15,12 +14,6 @@ const envSchema = z.object({
   TRIAL_DAYS: z.coerce.number().default(14),
 });
 
-const _env = envSchema.safeParse(process.env);
-
-if (!_env.success) {
-  console.error('❌ Invalid environment variables:', _env.error.format());
-  process.exit(1);
-}
-
-export const env = _env.data;
+// .parse() throws on error and guarantees `env` is never undefined in TypeScript
+export const env = envSchema.parse(process.env);
 export const allowedOrigins = env.CLIENT_URLS;
